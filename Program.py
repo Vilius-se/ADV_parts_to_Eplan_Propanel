@@ -66,7 +66,7 @@ def stage2_exclude_selection(df):
 def stage3_process_results(df, excluded, term_base):
     import math, re, io
 
-    st.subheader("3️⃣ Rezultatai ir EPLAN VBScript generavimas")
+    st.subheader("3️⃣ Rezultatai ir EPLAN 2025 VB.NET skripto generavimas")
 
     if not excluded:
         st.warning("⚠️ Pirma paspauskite 'Approve'.")
@@ -84,7 +84,6 @@ def stage3_process_results(df, excluded, term_base):
         df_filtered.columns[4]: "Grupė"
     }
     df_filtered = df_filtered.rename(columns=rename_map)
-    df_filtered["Jungimo taškas"] = df_filtered["Jungimo taškas"].astype(str).str.strip()
 
     df_filtered = df_filtered.merge(
         term_base[["Terminalas", "Plotis (mm)", "Pajungimų skaičius"]],
@@ -101,104 +100,76 @@ def stage3_process_results(df, excluded, term_base):
     def natural_key(v):
         return [int(t) if t.isdigit() else t for t in re.split(r'(\d+)', str(v))]
 
-    def fill_missing_conns(conns, per_terminal):
-        if not conns:
-            return ""
-        conns_sorted = sorted(conns, key=natural_key)
-        total_conns = len(conns_sorted)
-        total_slots = math.ceil(total_conns / per_terminal) * per_terminal
-        out = [conns_sorted[i] if i < len(conns_sorted) else "" for i in range(total_slots)]
-        return ", ".join(out)
-
-    grouped["Jungimų seka"] = grouped.apply(
-        lambda r: fill_missing_conns(r["Jungimo taškas"], int(r["Pajungimų skaičius"]))
-        if pd.notna(r["Pajungimų skaičius"]) and r["Pajungimų skaičius"] > 0 else "",
-        axis=1
-    )
-    grouped["Jungimų kiekis"] = grouped["Jungimo taškas"].apply(len)
-    grouped["Terminalų kiekis"] = grouped.apply(
-        lambda r: max(1, math.ceil(r["Jungimų kiekis"] / r["Pajungimų skaičius"]))
-        if pd.notna(r["Pajungimų skaičius"]) and r["Pajungimų skaičius"] > 0 else 1,
-        axis=1
-    )
-
     grouped = grouped.sort_values(by=["Grupė", "Terminalo pavadinimas"])
-    display_cols = [
-        "Terminalo pavadinimas", "Tipas", "Jungimų seka", "Jungimų kiekis",
-        "Pajungimų skaičius", "Terminalų kiekis", "Matomumas", "Grupė", "Plotis (mm)"
-    ]
-    st.dataframe(grouped[display_cols], use_container_width=True)
+    st.dataframe(grouped, use_container_width=True)
 
-    total_terminals = grouped["Terminalų kiekis"].sum()
-    st.markdown(f"### 🧮 Iš viso terminalų: **{int(total_terminals)}**")
+    total_terminals = len(grouped)
+    st.markdown(f"### 🧮 Aptikta {total_terminals} terminalų tipų")
 
     # ===============================================================
-    # 🧩 VBScript (.vbs) generavimas
+    # 💻 EPLAN 2025 VB.NET skriptas
     # ===============================================================
-    if st.button("🧩 Generuoti EPLAN skriptą (.vbs)"):
-        vbs_code = """' ================================================================
-' EPLAN Pro Panel – Terminalų automatinis įkėlimas
-' Sugeneruota iš Python Streamlit programos
+    if st.button("💻 Generuoti EPLAN 2025 skriptą (.vb)"):
+        # VB.NET skripto pagrindas
+        vb_code = """' ================================================================
+' EPLAN 2025 – Terminalų įkėlimas iš sąrašo (modernus API)
+' Sugeneruota iš Python Streamlit
 ' ================================================================
+Imports System.IO
+Imports System.Windows.Forms
+Imports Eplan.EplApi.Scripting
+Imports Eplan.EplApi.ApplicationFramework
 
-Option Explicit
+Public Class Import_Terminals_2025
 
-Sub Main
-    Dim oProject, xlApp, xlBook, xlSheet, row
-    Dim termName, termType, connList, connCount, groupCode
+    <Start>
+    Public Sub Main()
+        Try
+            Dim excelPath As String = InputBox("Įveskite Excel failo kelią:", "Importuoti terminalus", "C:\\Temp\\terminalai_rezultatas.xlsx")
+            If excelPath = "" Then
+                MessageBox.Show("Veiksmas nutrauktas – failas nepasirinktas.")
+                Exit Sub
+            End If
 
-    Set oProject = Projects.GetCurrentProject()
-    If oProject Is Nothing Then
-        MsgBox "❌ Atidarykite projektą prieš paleisdami skriptą!", vbCritical
-        Exit Sub
-    End If
+            Dim xlApp As Object = CreateObject("Excel.Application")
+            xlApp.Visible = False
+            Dim xlBook As Object = xlApp.Workbooks.Open(excelPath)
+            Dim xlSheet As Object = xlBook.Sheets(1)
 
-    Dim xlFile
-    xlFile = InputBox("Įveskite Excel failo kelią:", "Terminalų įkėlimas", "C:\\Temp\\terminalai_rezultatas.xlsx")
-    If xlFile = "" Then
-        MsgBox "Veiksmas nutrauktas – failas nepasirinktas.", vbExclamation
-        Exit Sub
-    End If
+            Dim row As Integer = 2
+            Do While xlSheet.Cells(row, 1).Value <> ""
+                Dim name As String = CStr(xlSheet.Cells(row, 1).Value)
+                Dim tType As String = CStr(xlSheet.Cells(row, 2).Value)
+                Dim groupCode As String = CStr(xlSheet.Cells(row, 5).Value)
 
-    Set xlApp = CreateObject("Excel.Application")
-    xlApp.Visible = False
-    Set xlBook = xlApp.Workbooks.Open(xlFile)
-    Set xlSheet = xlBook.Sheets(1)
+                Call CreateTerminal(name, tType, groupCode)
+                row += 1
+            Loop
 
-    row = 2
-    Do While xlSheet.Cells(row, 1).Value <> ""
-        termName = Trim(xlSheet.Cells(row, 1).Value)
-        termType = Trim(xlSheet.Cells(row, 2).Value)
-        connList = Trim(xlSheet.Cells(row, 3).Value)
-        connCount = xlSheet.Cells(row, 5).Value
-        groupCode = Trim(xlSheet.Cells(row, 8).Value)
+            xlBook.Close(False)
+            xlApp.Quit()
+            MessageBox.Show("✅ Terminalai importuoti sėkmingai!", "EPLAN Script")
 
-        Call AddTerminal(oProject, termName, termType, connList, connCount, groupCode)
-        row = row + 1
-    Loop
-
-    xlBook.Close False
-    xlApp.Quit
-    MsgBox "✅ Terminalai sėkmingai importuoti!", vbInformation
-End Sub
+        Catch ex As Exception
+            MessageBox.Show("❌ Klaida: " & ex.Message)
+        End Try
+    End Sub
 
 
-Sub AddTerminal(oProject, name, tType, conns, connCount, groupNo)
-    Dim oFunc
-    Set oFunc = New Eplan.EplApi.DataModel.Function(oProject)
-    oFunc.Name = name
-    oFunc.Properties("20010") = tType
-    oFunc.Properties("20013") = connCount
-    oFunc.Properties("20220") = groupNo
-    oFunc.Generate
-End Sub
+    Private Sub CreateTerminal(name As String, tType As String, groupCode As String)
+        Dim actSvc As New ActionService()
+        Dim actionName As String = "XEsCreateDevice"
+        Dim actionParams As String = "Name:" & name & ",Type:" & tType & ",FunctionDefinition:Terminal"
+        actSvc.Execute(actionName, actionParams)
+    End Sub
+
+End Class
 """
-
-        vbs_bytes = vbs_code.encode("utf-8")
+        vb_bytes = vb_code.encode("utf-8")
         st.download_button(
-            label="💾 Atsisiųsti VBScript (.vbs)",
-            data=vbs_bytes,
-            file_name="Import_Terminals_From_List.vbs",
+            label="📦 Atsisiųsti EPLAN 2025 VB.NET skriptą",
+            data=vb_bytes,
+            file_name="Import_Terminals_2025.vb",
             mime="text/plain"
         )
 
