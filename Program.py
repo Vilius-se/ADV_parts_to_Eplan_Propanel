@@ -1,78 +1,75 @@
 import streamlit as st
 import pandas as pd
-import io
+import io, math, re
+
+st.set_page_config(page_title="EPLAN Terminal Generator", layout="wide")
+
 
 # ===============================================================
-# 0️⃣ Terminalų bazinė lentelė
+# 0️⃣ Terminalų bazė (redaguojama)
 # ===============================================================
 def load_terminal_base():
-    st.subheader("0️⃣ Terminalų duomenų bazė (redaguojama)")
+    st.subheader("0️⃣ Terminalų bazė")
     default_data = pd.DataFrame({
         "Terminalas": ["2002-1301", "2002-1304", "2002-3201", "2002-3207",
                        "2006-8031", "2006-8034", "2016-1201"],
         "Plotis (mm)": [5.2, 5.2, 5.2, 5.2, 9.0, 9.0, 12.0],
         "Pajungimų skaičius": [2, 2, 3, 3, 7, 7, 2]
     })
-    edited = st.data_editor(default_data, num_rows="dynamic", key="terminal_base")
-    return edited
+    return st.data_editor(default_data, num_rows="dynamic", key="term_base")
 
 
 # ===============================================================
 # 1️⃣ Excel įkėlimas
 # ===============================================================
 def stage1_load_excel():
-    st.subheader("1️⃣ Įkelkite Excel failą su terminalų duomenimis")
-    uploaded_file = st.file_uploader("Pasirinkite Excel failą", type=["xlsx", "xls"], key="upload")
-    if uploaded_file:
-        df = pd.read_excel(uploaded_file)
-        st.success("✅ Failas įkeltas sėkmingai")
-        st.dataframe(df.head())
-        return df
-    else:
-        st.info("Įkelkite Excel failą, kad tęstumėte.")
+    st.subheader("1️⃣ Įkelkite Excel failą")
+    file = st.file_uploader("Pasirinkite Excel failą", type=["xlsx", "xls"])
+    if not file:
+        st.info("Įkelkite failą, kad tęstumėte.")
         return None
+    df = pd.read_excel(file)
+    st.success("✅ Failas įkeltas")
+    st.dataframe(df.head())
+    return df
 
 
 # ===============================================================
-# 2️⃣ Terminalų pašalinimo pasirinkimas
+# 2️⃣ Terminalų išskyrimas
 # ===============================================================
 def stage2_exclude_selection(df):
-    st.subheader("2️⃣ Pašalintinų terminalų pasirinkimas")
+    st.subheader("2️⃣ Terminalų išskyrimas (Exclude)")
+    default_excluded = ["-X0100", "-X0101", "-X0102", "-X111", "-X908",
+                        "-X923", "-X927", "-X928", "-XTB10"]
 
-    default_excluded = ["-X0100", "-X0101", "-X0102", "-X111",
-                        "-X908", "-X923", "-X927", "-X928", "-XTB10"]
     unique_terms = sorted(df.iloc[:, 0].dropna().unique())
-
-    # --- Naudojam session_state, kad duomenys neišsitrintų ---
     if "excluded" not in st.session_state:
-        st.session_state.excluded = None
+        st.session_state.excluded = default_excluded
 
-    selected = []
     with st.form("exclude_form"):
-        st.write("Pažymėkite terminalus, kuriuos norite pašalinti:")
+        selected = []
         for t in unique_terms:
-            checked = t in default_excluded
+            checked = t in st.session_state.excluded
             if st.checkbox(t, value=checked, key=f"exc_{t}"):
                 selected.append(t)
         approved = st.form_submit_button("✅ Approve")
 
     if approved:
         st.session_state.excluded = selected
-        st.success(f"Patvirtinta. Pašalinti terminalai: {', '.join(selected) if selected else 'nėra'}")
-
+        st.success(f"Patvirtinta: {len(selected)} terminalų išskirta.")
     return st.session_state.excluded
 
 
-def stage3_process_results(df, excluded, terminal_table):
-    import math, re, io
+# ===============================================================
+# 3️⃣ Rezultatai + VB.NET skripto generavimas
+# ===============================================================
+def stage3_process_results(df, excluded, term_base):
+    st.subheader("3️⃣ Rezultatai ir EPLAN VB.NET skriptas")
 
-    st.subheader("3️⃣ Rezultatai ir EPLAN skripto generavimas")
-
-    if excluded is None:
-        st.warning("⚠️ Pirma patvirtinkite pašalintinus terminalus.")
+    if not excluded:
+        st.warning("⚠️ Pirma paspauskite 'Approve'.")
         return
 
-    # === DUOMENŲ PARUOŠIMAS ===
     df_filtered = df[~df.iloc[:, 0].isin(excluded)].copy()
     rename_map = {
         df_filtered.columns[0]: "Terminalo pavadinimas",
@@ -85,19 +82,19 @@ def stage3_process_results(df, excluded, terminal_table):
     df_filtered["Jungimo taškas"] = df_filtered["Jungimo taškas"].astype(str).str.strip()
 
     df_filtered = df_filtered.merge(
-        terminal_table[["Terminalas", "Plotis (mm)", "Pajungimų skaičius"]],
+        term_base[["Terminalas", "Plotis (mm)", "Pajungimų skaičius"]],
         how="left", left_on="Tipas", right_on="Terminalas"
     ).drop(columns=["Terminalas"])
 
     grouped = (
-        df_filtered.groupby(["Terminalo pavadinimas", "Tipas", "Matomumas", "Grupė",
-                             "Plotis (mm)", "Pajungimų skaičius"])
+        df_filtered.groupby(["Terminalo pavadinimas", "Tipas", "Matomumas",
+                             "Grupė", "Plotis (mm)", "Pajungimų skaičius"])
         .agg({"Jungimo taškas": lambda x: sorted(set([v for v in x if v not in ["nan", "None", ""]]))})
         .reset_index()
     )
 
-    def natural_key(value):
-        return [int(t) if t.isdigit() else t for t in re.split(r'(\d+)', str(value))]
+    def natural_key(v):
+        return [int(t) if t.isdigit() else t for t in re.split(r'(\d+)', str(v))]
 
     def fill_missing_conns(conns, per_terminal):
         if not conns:
@@ -105,10 +102,8 @@ def stage3_process_results(df, excluded, terminal_table):
         conns_sorted = sorted(conns, key=natural_key)
         total_conns = len(conns_sorted)
         total_slots = math.ceil(total_conns / per_terminal) * per_terminal
-        filled = []
-        for i in range(total_slots):
-            filled.append(conns_sorted[i] if i < len(conns_sorted) else "")
-        return ", ".join(filled)
+        out = [conns_sorted[i] if i < len(conns_sorted) else "" for i in range(total_slots)]
+        return ", ".join(out)
 
     grouped["Jungimų seka"] = grouped.apply(
         lambda r: fill_missing_conns(r["Jungimo taškas"], int(r["Pajungimų skaičius"]))
@@ -124,86 +119,86 @@ def stage3_process_results(df, excluded, terminal_table):
 
     grouped = grouped.sort_values(by=["Grupė", "Terminalo pavadinimas"])
     display_cols = [
-        "Terminalo pavadinimas", "Tipas", "Jungimų seka",
-        "Jungimų kiekis", "Pajungimų skaičius", "Terminalų kiekis",
-        "Matomumas", "Grupė", "Plotis (mm)"
+        "Terminalo pavadinimas", "Tipas", "Jungimų seka", "Jungimų kiekis",
+        "Pajungimų skaičius", "Terminalų kiekis", "Matomumas", "Grupė", "Plotis (mm)"
     ]
     st.dataframe(grouped[display_cols], use_container_width=True)
 
-    # === EPLAN SCRIPT GENERAVIMAS ===
-    if st.button("🧩 Generuoti EPLAN skriptą (.vbs)"):
-        script = []
-        script.append("' ================================================")
-        script.append("'  AUTOMATINIS TERMINALŲ ĮKĖLIMO SKRIPTAS EPLAN")
-        script.append("'  Sukurta automatiškai iš Streamlit programos")
-        script.append("' ================================================")
-        script.append("Option Explicit")
-        script.append("Sub Main()")
-        script.append("  Dim oProject, xlSheet, termName, termType, connList, connCount, groupCode")
-        script.append("  Set oProject = Projects.GetCurrentProject()")
-        script.append("  If oProject Is Nothing Then")
-        script.append("    MsgBox \"Atidarykite projektą prieš paleisdami skriptą!\", vbCritical")
-        script.append("    Exit Sub")
-        script.append("  End If")
-        script.append("  MsgBox \"Terminalų įkėlimas prasideda...\", vbInformation")
+    total_terminals = grouped["Terminalų kiekis"].sum()
+    st.markdown(f"### 🧮 Iš viso terminalų: **{int(total_terminals)}**")
 
-        # kiekviena eilutė iš lentelės
+    # ===============================================================
+    # 💻 VB.NET SCRIPT GENERAVIMAS
+    # ===============================================================
+    if st.button("💻 Generuoti EPLAN VB.NET skriptą (.vb)"):
+        vbnet_code = f"""' ================================================================
+' EPLAN Electric P8 – Terminalų automatinis įkėlimas
+' Sugeneruota iš Streamlit programos ({len(grouped)} eilučių)
+' ================================================================
+Imports System.IO
+Imports System.Windows.Forms
+Imports Eplan.EplApi.ApplicationFramework
+Imports Eplan.EplApi.DataModel
+Imports Eplan.EplApi.Base
+
+Public Class Import_Terminals_From_List
+    <Start> _
+    Public Sub Main()
+        Dim project As Project = New SelectionSet().GetCurrentProject()
+        If project Is Nothing Then
+            MessageBox.Show("❌ Nėra atidaryto projekto – atidarykite prieš paleidžiant.")
+            Exit Sub
+        End If
+        MessageBox.Show("Terminalų įkėlimas pradėtas...", "EPLAN Script")
+
+"""
         for _, r in grouped.iterrows():
             name = r["Terminalo pavadinimas"]
-            typ = r["Tipas"]
-            seq = r["Jungimų seka"]
-            conn_count = r["Pajungimų skaičius"]
+            ttype = r["Tipas"]
+            conns = r["Jungimų seka"].replace('"', "'")
+            conncount = int(r["Pajungimų skaičius"])
             group = r["Grupė"]
-            script.append(f"  Call AddTerminal(oProject, \"{name}\", \"{typ}\", \"{seq}\", {conn_count}, \"{group}\")")
+            vbnet_code += f'        AddTerminal(project, "{name}", "{ttype}", "{conns}", {conncount}, "{group}")\n'
 
-        # papildomos funkcijos
-        script.append("  MsgBox \"✅ Visi terminalai įkelti į EPLAN projektą!\", vbInformation")
-        script.append("End Sub")
-        script.append("")
-        script.append("Sub AddTerminal(oProject, name, tType, conns, connCount, groupNo)")
-        script.append("  Dim oFunc, arr, i")
-        script.append("  Set oFunc = New Eplan.EplApi.DataModel.Function(oProject)")
-        script.append("  oFunc.Name = name")
-        script.append("  oFunc.Properties(\"20010\") = tType")
-        script.append("  oFunc.Properties(\"20013\") = connCount")
-        script.append("  oFunc.Properties(\"20220\") = groupNo")
-        script.append("  arr = Split(conns, \",\")")
-        script.append("  For i = LBound(arr) To UBound(arr)")
-        script.append("    If Trim(arr(i)) <> \"\" Then")
-        script.append("      oFunc.Properties(\"20014\") = Trim(arr(i))")
-        script.append("    End If")
-        script.append("  Next")
-        script.append("  oFunc.Generate()")
-        script.append("End Sub")
+        vbnet_code += """
+        MessageBox.Show("✅ Terminalai sukurti sėkmingai!", "Import Complete")
+    End Sub
 
-        vbs_content = "\n".join(script)
-        vbs_bytes = vbs_content.encode("utf-8")
-
+    Private Sub AddTerminal(project As Project, name As String, tType As String, conns As String, connCount As Integer, groupNo As String)
+        Try
+            Dim dm As New DataModelManager()
+            Dim func As Function = dm.CreateFunction(FunctionType.Terminal)
+            func.Name = name
+            func.Properties("20010") = tType
+            func.Properties("20013") = connCount
+            func.Properties("20220") = groupNo
+            func.Generate()
+        Catch ex As Exception
+            MessageBox.Show("Klaida kuriant terminalą: " & ex.Message)
+        End Try
+    End Sub
+End Class
+"""
+        vbnet_bytes = vbnet_code.encode("utf-8")
         st.download_button(
-            label="💾 Atsisiųsti EPLAN skriptą",
-            data=vbs_bytes,
-            file_name="Import_Terminals_From_List.vbs",
+            label="📦 Atsisiųsti VB.NET skriptą",
+            data=vbnet_bytes,
+            file_name="Import_Terminals_From_List.vb",
             mime="text/plain"
         )
 
-    # Bendras terminalų kiekis
-    total_terminals = grouped["Terminalų kiekis"].sum()
-    st.markdown(f"### 🧮 Viso terminalų: **{int(total_terminals)}**")
-
-
 
 # ===============================================================
-# 🔁 MAIN PIPELINE
+# MAIN PIPELINE
 # ===============================================================
 def main():
-    st.title("🔌 Terminalų apdorojimo pipeline")
+    st.title("⚙️ EPLAN Terminalų Generatorius")
 
-    terminal_table = load_terminal_base()
+    term_base = load_terminal_base()
     df = stage1_load_excel()
-
     if df is not None:
         excluded = stage2_exclude_selection(df)
-        stage3_process_results(df, excluded, terminal_table)
+        stage3_process_results(df, excluded, term_base)
 
 
 if __name__ == "__main__":
