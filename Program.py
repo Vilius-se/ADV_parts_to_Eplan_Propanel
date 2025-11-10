@@ -160,11 +160,7 @@ def stage3_process_results(df, excluded, term_base):
         vb_lines = []
         vb_lines.append("' ================================================================")
         vb_lines.append("' EPLAN 2025 – Terminalų automatinis įkėlimas (Streamlit sugeneruota)")
-        vb_lines.append("' Naudoja CommandLineInterpreter + ActionCallingContext (naujas API)")
         vb_lines.append("' ================================================================")
-        vb_lines.append("Imports Eplan.EplApi.Scripting")
-        vb_lines.append("Imports Eplan.EplApi.ApplicationFramework")
-        vb_lines.append("Imports System.Windows.Forms")
         vb_lines.append("")
         vb_lines.append("Public Class Import_Terminals_2025")
         vb_lines.append("    <Start>")
@@ -172,7 +168,6 @@ def stage3_process_results(df, excluded, term_base):
         vb_lines.append("        Try")
         vb_lines.append("            Dim cli As New CommandLineInterpreter()")
         vb_lines.append("            Dim ctx As New ActionCallingContext()")
-        vb_lines.append("")
     
         # Įrašome terminalų eilutes
         for _, r in grouped.iterrows():
