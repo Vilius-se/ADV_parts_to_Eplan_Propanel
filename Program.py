@@ -64,12 +64,17 @@ def stage2_exclude_selection(df):
 # 3️⃣ Rezultatai + VB.NET skripto generavimas
 # ===============================================================
 def stage3_process_results(df, excluded, term_base):
+    import math, re, io
+
     st.subheader("3️⃣ Rezultatai ir EPLAN VB.NET skriptas")
 
     if not excluded:
         st.warning("⚠️ Pirma paspauskite 'Approve'.")
         return
 
+    # ===============================================================
+    # 🔹 DUOMENŲ APDOROJIMAS
+    # ===============================================================
     df_filtered = df[~df.iloc[:, 0].isin(excluded)].copy()
     rename_map = {
         df_filtered.columns[0]: "Terminalo pavadinimas",
@@ -128,57 +133,76 @@ def stage3_process_results(df, excluded, term_base):
     st.markdown(f"### 🧮 Iš viso terminalų: **{int(total_terminals)}**")
 
     # ===============================================================
-    # 💻 VB.NET SCRIPT GENERAVIMAS
+    # 💻 VB.NET SCRIPT GENERAVIMAS (teisinga EPLAN API versija)
     # ===============================================================
     if st.button("💻 Generuoti EPLAN VB.NET skriptą (.vb)"):
-        vbnet_code = f"""' ================================================================
-' EPLAN Electric P8 – Terminalų automatinis įkėlimas
-' Sugeneruota iš Streamlit programos ({len(grouped)} eilučių)
+        vbnet_code = """' ================================================================
+' EPLAN Electric P8 – Terminalų automatinis įkėlimas iš sąrašo
+' Tinkama EPLAN Script API aplinkai (VB.NET)
 ' ================================================================
+
 Imports System.IO
 Imports System.Windows.Forms
-Imports Eplan.EplApi.ApplicationFramework
-Imports Eplan.EplApi.DataModel
+Imports Eplan.EplApi.Scripting
 Imports Eplan.EplApi.Base
+Imports Eplan.EplApi.DataModel
 
 Public Class Import_Terminals_From_List
-    <Start> _
-    Public Sub Main()
-        Dim project As Project = New SelectionSet().GetCurrentProject()
-        If project Is Nothing Then
-            MessageBox.Show("❌ Nėra atidaryto projekto – atidarykite prieš paleidžiant.")
-            Exit Sub
-        End If
-        MessageBox.Show("Terminalų įkėlimas pradėtas...", "EPLAN Script")
 
+    <Start>
+    Public Sub Main()
+        Dim oProject As Project = Nothing
+        Try
+            Dim selection As New SelectionSet()
+            oProject = selection.GetCurrentProject()
+
+            If oProject Is Nothing Then
+                MessageBox.Show("❌ Nėra atidaryto projekto – atidarykite prieš paleidžiant.")
+                Exit Sub
+            End If
+
+            MessageBox.Show("Terminalų įkėlimas pradėtas...", "EPLAN Script")
 """
+
+        # Terminalų sąrašas įrašomas tiesiai į VB kodą
         for _, r in grouped.iterrows():
             name = r["Terminalo pavadinimas"]
             ttype = r["Tipas"]
             conns = r["Jungimų seka"].replace('"', "'")
             conncount = int(r["Pajungimų skaičius"])
             group = r["Grupė"]
-            vbnet_code += f'        AddTerminal(project, "{name}", "{ttype}", "{conns}", {conncount}, "{group}")\n'
+            vbnet_code += f'            AddTerminal(oProject, "{name}", "{ttype}", "{conns}", {conncount}, "{group}")\n'
 
         vbnet_code += """
-        MessageBox.Show("✅ Terminalai sukurti sėkmingai!", "Import Complete")
+            MessageBox.Show("✅ Terminalai įkelti sėkmingai!", "Import complete")
+
+        Catch ex As Exception
+            MessageBox.Show("Klaida skripte: " & ex.Message)
+        End Try
     End Sub
 
     Private Sub AddTerminal(project As Project, name As String, tType As String, conns As String, connCount As Integer, groupNo As String)
         Try
             Dim dm As New DataModelManager()
-            Dim func As Function = dm.CreateFunction(FunctionType.Terminal)
+            dm.SetProject(project)
+
+            ' Sukuriame naują terminalo funkciją
+            Dim func As [Function] = dm.CreateFunction(FunctionType.Terminal)
             func.Name = name
-            func.Properties("20010") = tType
-            func.Properties("20013") = connCount
-            func.Properties("20220") = groupNo
+            func.Properties(FunctionProperties.FunctionDesignation) = name
+            func.Properties(FunctionProperties.ArticleNumber) = tType
+            func.Properties(FunctionProperties.NumberOfConnections) = connCount
+            func.Properties(FunctionProperties.Location) = groupNo
             func.Generate()
+
         Catch ex As Exception
             MessageBox.Show("Klaida kuriant terminalą: " & ex.Message)
         End Try
     End Sub
+
 End Class
 """
+
         vbnet_bytes = vbnet_code.encode("utf-8")
         st.download_button(
             label="📦 Atsisiųsti VB.NET skriptą",
@@ -186,6 +210,7 @@ End Class
             file_name="Import_Terminals_From_List.vb",
             mime="text/plain"
         )
+
 
 
 # ===============================================================
