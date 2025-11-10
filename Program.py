@@ -59,19 +59,16 @@ def stage2_exclude_selection(df):
 
 
 def stage3_process_results(df, excluded, terminal_table):
-    import math
-    import re
+    import math, re, io
 
-    st.subheader("3️⃣ Rezultatai")
+    st.subheader("3️⃣ Rezultatai ir EPLAN skripto generavimas")
 
     if excluded is None:
         st.warning("⚠️ Pirma patvirtinkite pašalintinus terminalus.")
         return
 
-    # Filtruojame pašalintus terminalus
+    # === DUOMENŲ PARUOŠIMAS ===
     df_filtered = df[~df.iloc[:, 0].isin(excluded)].copy()
-
-    # Aiškūs pavadinimai
     rename_map = {
         df_filtered.columns[0]: "Terminalo pavadinimas",
         df_filtered.columns[1]: "Tipas",
@@ -80,17 +77,13 @@ def stage3_process_results(df, excluded, terminal_table):
         df_filtered.columns[4]: "Grupė"
     }
     df_filtered = df_filtered.rename(columns=rename_map)
+    df_filtered["Jungimo taškas"] = df_filtered["Jungimo taškas"].astype(str).str.strip()
 
-    # Pridedame duomenis iš bazės
     df_filtered = df_filtered.merge(
         terminal_table[["Terminalas", "Plotis (mm)", "Pajungimų skaičius"]],
         how="left", left_on="Tipas", right_on="Terminalas"
     ).drop(columns=["Terminalas"])
 
-    # Išvalome jungimų duomenis (konvertuojame į tekstą, pašaliname tarpus)
-    df_filtered["Jungimo taškas"] = df_filtered["Jungimo taškas"].astype(str).str.strip()
-
-    # Grupavimas
     grouped = (
         df_filtered.groupby(["Terminalo pavadinimas", "Tipas", "Matomumas", "Grupė",
                              "Plotis (mm)", "Pajungimų skaičius"])
@@ -98,16 +91,12 @@ def stage3_process_results(df, excluded, terminal_table):
         .reset_index()
     )
 
-    # Natūralus rūšiavimas raidėms ir skaičiams
     def natural_key(value):
-        # Išskaido į skaičius ir raides (kad "A10" > "A2")
         return [int(t) if t.isdigit() else t for t in re.split(r'(\d+)', str(value))]
 
-    # Jungimų seka su tuščiomis vietomis
     def fill_missing_conns(conns, per_terminal):
         if not conns:
             return ""
-        # Rikiuojame natūraliai
         conns_sorted = sorted(conns, key=natural_key)
         total_conns = len(conns_sorted)
         total_slots = math.ceil(total_conns / per_terminal) * per_terminal
@@ -121,8 +110,6 @@ def stage3_process_results(df, excluded, terminal_table):
         if pd.notna(r["Pajungimų skaičius"]) and r["Pajungimų skaičius"] > 0 else "",
         axis=1
     )
-
-    # Skaičiuojame terminalų kiekį pagal jungimų kiekį
     grouped["Jungimų kiekis"] = grouped["Jungimo taškas"].apply(len)
     grouped["Terminalų kiekis"] = grouped.apply(
         lambda r: max(1, math.ceil(r["Jungimų kiekis"] / r["Pajungimų skaičius"]))
@@ -130,10 +117,7 @@ def stage3_process_results(df, excluded, terminal_table):
         axis=1
     )
 
-    # Rikiavimas pagal grupę ir pavadinimą
     grouped = grouped.sort_values(by=["Grupė", "Terminalo pavadinimas"])
-
-    # Lentelės atvaizdavimas
     display_cols = [
         "Terminalo pavadinimas", "Tipas", "Jungimų seka",
         "Jungimų kiekis", "Pajungimų skaičius", "Terminalų kiekis",
@@ -141,21 +125,66 @@ def stage3_process_results(df, excluded, terminal_table):
     ]
     st.dataframe(grouped[display_cols], use_container_width=True)
 
-    # Eksportas
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        grouped.to_excel(writer, index=False, sheet_name="Rezultatas")
+    # === EPLAN SCRIPT GENERAVIMAS ===
+    if st.button("🧩 Generuoti EPLAN skriptą (.vbs)"):
+        script = []
+        script.append("' ================================================")
+        script.append("'  AUTOMATINIS TERMINALŲ ĮKĖLIMO SKRIPTAS EPLAN")
+        script.append("'  Sukurta automatiškai iš Streamlit programos")
+        script.append("' ================================================")
+        script.append("Option Explicit")
+        script.append("Sub Main()")
+        script.append("  Dim oProject, xlSheet, termName, termType, connList, connCount, groupCode")
+        script.append("  Set oProject = Projects.GetCurrentProject()")
+        script.append("  If oProject Is Nothing Then")
+        script.append("    MsgBox \"Atidarykite projektą prieš paleisdami skriptą!\", vbCritical")
+        script.append("    Exit Sub")
+        script.append("  End If")
+        script.append("  MsgBox \"Terminalų įkėlimas prasideda...\", vbInformation")
 
-    st.download_button(
-        "📥 Atsisiųsti rezultatą (Excel)",
-        data=output.getvalue(),
-        file_name="terminalai_rezultatas.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+        # kiekviena eilutė iš lentelės
+        for _, r in grouped.iterrows():
+            name = r["Terminalo pavadinimas"]
+            typ = r["Tipas"]
+            seq = r["Jungimų seka"]
+            conn_count = r["Pajungimų skaičius"]
+            group = r["Grupė"]
+            script.append(f"  Call AddTerminal(oProject, \"{name}\", \"{typ}\", \"{seq}\", {conn_count}, \"{group}\")")
+
+        # papildomos funkcijos
+        script.append("  MsgBox \"✅ Visi terminalai įkelti į EPLAN projektą!\", vbInformation")
+        script.append("End Sub")
+        script.append("")
+        script.append("Sub AddTerminal(oProject, name, tType, conns, connCount, groupNo)")
+        script.append("  Dim oFunc, arr, i")
+        script.append("  Set oFunc = New Eplan.EplApi.DataModel.Function(oProject)")
+        script.append("  oFunc.Name = name")
+        script.append("  oFunc.Properties(\"20010\") = tType")
+        script.append("  oFunc.Properties(\"20013\") = connCount")
+        script.append("  oFunc.Properties(\"20220\") = groupNo")
+        script.append("  arr = Split(conns, \",\")")
+        script.append("  For i = LBound(arr) To UBound(arr)")
+        script.append("    If Trim(arr(i)) <> \"\" Then")
+        script.append("      oFunc.Properties(\"20014\") = Trim(arr(i))")
+        script.append("    End If")
+        script.append("  Next")
+        script.append("  oFunc.Generate()")
+        script.append("End Sub")
+
+        vbs_content = "\n".join(script)
+        vbs_bytes = vbs_content.encode("utf-8")
+
+        st.download_button(
+            label="💾 Atsisiųsti EPLAN skriptą",
+            data=vbs_bytes,
+            file_name="Import_Terminals_From_List.vbs",
+            mime="text/plain"
+        )
 
     # Bendras terminalų kiekis
     total_terminals = grouped["Terminalų kiekis"].sum()
     st.markdown(f"### 🧮 Viso terminalų: **{int(total_terminals)}**")
+
 
 
 # ===============================================================
