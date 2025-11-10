@@ -89,31 +89,42 @@ def stage3_process_results(df, excluded, terminal_table):
         how="left", left_on="Tipas", right_on="Terminalas"
     ).drop(columns=["Terminalas"])
 
-    # Grupavimas
+    # Grupavimas pagal terminalą
     grouped = (
         df_filtered.groupby(["Terminalo pavadinimas", "Tipas", "Matomumas", "Grupė",
                              "Plotis (mm)", "Pajungimų skaičius"])
-        .agg({
-            "Jungimo taškas": ["max", "count", lambda x: sorted(list(x))]
-        })
+        .agg({"Jungimo taškas": lambda x: sorted(set([v for v in x if pd.notna(v)]))})
         .reset_index()
     )
-    grouped.columns = [
-        "Terminalo pavadinimas", "Tipas", "Matomumas", "Grupė",
-        "Plotis (mm)", "Pajungimų skaičius",
-        "Didžiausias jungimas", "Jungimų kiekis", "Jungimų sąrašas"
-    ]
 
-    # Skaičiuojam kiek fizinių terminalų reikia
-    grouped["Terminalų kiekis"] = grouped.apply(
-        lambda r: math.ceil(r["Didžiausias jungimas"] / r["Pajungimų skaičius"])
-        if pd.notna(r["Didžiausias jungimas"]) and pd.notna(r["Pajungimų skaičius"]) else 0,
+    # Funkcija jungimo sąrašo užpildymui
+    def fill_missing_conns(conns, per_terminal):
+        """Papildo sąrašą tuščiomis reikšmėmis iki artimiausio pilno modulo."""
+        if not conns:
+            return ""
+        max_conn = int(max(conns))
+        total_positions = math.ceil(max_conn / per_terminal) * per_terminal
+        filled = []
+        all_positions = list(range(1, total_positions + 1))
+        for pos in all_positions:
+            filled.append(str(int(pos)) if pos in conns else "")
+        return ", ".join(filled)
+
+    # Pridėkime jungimo sekas ir apskaičiuokime terminalų kiekį
+    grouped["Jungimų seka"] = grouped.apply(
+        lambda r: fill_missing_conns(r["Jungimo taškas"], int(r["Pajungimų skaičius"])) 
+        if pd.notna(r["Pajungimų skaičius"]) else "",
         axis=1
     )
 
-    # Formatuojam jungimų sąrašą kaip tekstą
-    grouped["Jungimų sąrašas"] = grouped["Jungimų sąrašas"].apply(
-        lambda x: ", ".join(map(str, x)) if isinstance(x, list) else str(x)
+    # Didžiausias jungimas
+    grouped["Didžiausias jungimas"] = grouped["Jungimo taškas"].apply(lambda x: max(x) if x else 0)
+
+    # Kiek terminalų
+    grouped["Terminalų kiekis"] = grouped.apply(
+        lambda r: max(1, math.ceil(r["Didžiausias jungimas"] / r["Pajungimų skaičius"]))
+        if pd.notna(r["Didžiausias jungimas"]) and pd.notna(r["Pajungimų skaičius"]) else 1,
+        axis=1
     )
 
     # Rikiavimas
@@ -121,9 +132,8 @@ def stage3_process_results(df, excluded, terminal_table):
 
     # Lentelės atvaizdavimas
     display_cols = [
-        "Terminalo pavadinimas", "Tipas", "Jungimų sąrašas",
-        "Jungimų kiekis", "Pajungimų skaičius",
-        "Terminalų kiekis", "Matomumas", "Grupė", "Plotis (mm)"
+        "Terminalo pavadinimas", "Tipas", "Jungimų seka",
+        "Pajungimų skaičius", "Terminalų kiekis", "Matomumas", "Grupė", "Plotis (mm)"
     ]
     st.dataframe(grouped[display_cols], use_container_width=True)
 
@@ -142,6 +152,7 @@ def stage3_process_results(df, excluded, terminal_table):
     # Suminis terminalų kiekis
     total_terminals = grouped["Terminalų kiekis"].sum()
     st.markdown(f"### 🧮 Viso terminalų: **{int(total_terminals)}**")
+
 
 
 
