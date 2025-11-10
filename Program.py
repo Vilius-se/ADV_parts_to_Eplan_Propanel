@@ -156,10 +156,12 @@ def stage3_process_results(df, excluded, term_base):
     # ---------------------------------------------------------------
     # 4️⃣ VB.NET skripto (EPLAN 2025) generavimas – CommandLineInterpreter API
     # ---------------------------------------------------------------
-    if st.button("💻 Generuoti EPLAN 2025 VB.NET skriptą (.vb)"):
+    if st.button("💻 Generuoti universalų EPLAN 2025 VB.NET skriptą (.vb)"):
         vb_lines = []
         vb_lines.append("' ================================================================")
-        vb_lines.append("' EPLAN 2025 – Terminalų automatinis įkėlimas (Streamlit sugeneruota)")
+        vb_lines.append("' UNIVERSALUS EPLAN 2025 TERMINALŲ ĮKĖLIMO SKRIPTAS")
+        vb_lines.append("' Veikia ir Pro Panel, ir Electric P8 aplinkoje")
+        vb_lines.append("' Sugeneruota Streamlit programos")
         vb_lines.append("' ================================================================")
         vb_lines.append("")
         vb_lines.append("Public Class Import_Terminals_2025")
@@ -168,8 +170,11 @@ def stage3_process_results(df, excluded, term_base):
         vb_lines.append("        Try")
         vb_lines.append("            Dim cli As New CommandLineInterpreter()")
         vb_lines.append("            Dim ctx As New ActionCallingContext()")
+        vb_lines.append("")
+        vb_lines.append("            ' --- Patikriname, ar egzistuoja XEsCreateDevice ---")
+        vb_lines.append('            Dim hasProPanel As Boolean = cli.HasAction("XEsCreateDevice")')
+        vb_lines.append("")
     
-        # Įrašome terminalų eilutes
         for _, r in grouped.iterrows():
             name = str(r["Terminalo pavadinimas"]).replace('"', "'")
             ttype = str(r["Tipas"]).replace('"', "'")
@@ -180,7 +185,12 @@ def stage3_process_results(df, excluded, term_base):
             vb_lines.append(f'            ctx.AddParameter("Type", "{ttype}")')
             vb_lines.append('            ctx.AddParameter("FunctionDefinition", "Terminal")')
             vb_lines.append(f'            ctx.AddParameter("MountingLocation", "{group}")')
-            vb_lines.append('            cli.Execute("XEsCreateDevice", ctx)')
+            vb_lines.append("")
+            vb_lines.append("            If hasProPanel Then")
+            vb_lines.append('                cli.Execute("XEsCreateDevice", ctx)')
+            vb_lines.append("            Else")
+            vb_lines.append('                cli.Execute("XAfActionCreateFunction", ctx)')
+            vb_lines.append("            End If")
             vb_lines.append("")
     
         vb_lines.append(f'            MessageBox.Show("✅ Sukurta {int(total_terminals)} terminalų!", "EPLAN Script", MessageBoxButtons.OK, MessageBoxIcon.Information)')
@@ -193,7 +203,7 @@ def stage3_process_results(df, excluded, term_base):
         vb_code = "\n".join(vb_lines)
     
         st.download_button(
-            label="📦 Atsisiųsti EPLAN 2025 VB.NET skriptą",
+            label="📦 Atsisiųsti universalų EPLAN 2025 VB.NET skriptą",
             data=vb_code.encode("utf-8"),
             file_name="Import_Terminals_2025.vb",
             mime="text/plain"
