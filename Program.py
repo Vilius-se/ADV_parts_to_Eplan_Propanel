@@ -60,6 +60,7 @@ def stage2_exclude_selection(df):
 
 def stage3_process_results(df, excluded, terminal_table):
     import math
+    import re
 
     st.subheader("3️⃣ Rezultatai")
 
@@ -67,7 +68,7 @@ def stage3_process_results(df, excluded, terminal_table):
         st.warning("⚠️ Pirma patvirtinkite pašalintinus terminalus.")
         return
 
-    # Filtruojam pašalintus terminalus
+    # Filtruojame pašalintus terminalus
     df_filtered = df[~df.iloc[:, 0].isin(excluded)].copy()
 
     # Aiškūs pavadinimai
@@ -80,64 +81,67 @@ def stage3_process_results(df, excluded, terminal_table):
     }
     df_filtered = df_filtered.rename(columns=rename_map)
 
-    # Paverčiam jungimo taškus į skaičius
-    df_filtered["Jungimo taškas"] = pd.to_numeric(df_filtered["Jungimo taškas"], errors="coerce")
-
-    # Pridedam informaciją iš terminalų bazės
+    # Pridedame duomenis iš bazės
     df_filtered = df_filtered.merge(
         terminal_table[["Terminalas", "Plotis (mm)", "Pajungimų skaičius"]],
         how="left", left_on="Tipas", right_on="Terminalas"
     ).drop(columns=["Terminalas"])
 
-    # Grupavimas pagal terminalą
+    # Išvalome jungimų duomenis (konvertuojame į tekstą, pašaliname tarpus)
+    df_filtered["Jungimo taškas"] = df_filtered["Jungimo taškas"].astype(str).str.strip()
+
+    # Grupavimas
     grouped = (
         df_filtered.groupby(["Terminalo pavadinimas", "Tipas", "Matomumas", "Grupė",
                              "Plotis (mm)", "Pajungimų skaičius"])
-        .agg({"Jungimo taškas": lambda x: sorted(set([v for v in x if pd.notna(v)]))})
+        .agg({"Jungimo taškas": lambda x: sorted(set([v for v in x if v not in ["nan", "None", ""]]))})
         .reset_index()
     )
 
-    # Funkcija jungimo sąrašo užpildymui
+    # Natūralus rūšiavimas raidėms ir skaičiams
+    def natural_key(value):
+        # Išskaido į skaičius ir raides (kad "A10" > "A2")
+        return [int(t) if t.isdigit() else t for t in re.split(r'(\d+)', str(value))]
+
+    # Jungimų seka su tuščiomis vietomis
     def fill_missing_conns(conns, per_terminal):
-        """Papildo sąrašą tuščiomis reikšmėmis iki artimiausio pilno modulo."""
         if not conns:
             return ""
-        max_conn = int(max(conns))
-        total_positions = math.ceil(max_conn / per_terminal) * per_terminal
+        # Rikiuojame natūraliai
+        conns_sorted = sorted(conns, key=natural_key)
+        total_conns = len(conns_sorted)
+        total_slots = math.ceil(total_conns / per_terminal) * per_terminal
         filled = []
-        all_positions = list(range(1, total_positions + 1))
-        for pos in all_positions:
-            filled.append(str(int(pos)) if pos in conns else "")
+        for i in range(total_slots):
+            filled.append(conns_sorted[i] if i < len(conns_sorted) else "")
         return ", ".join(filled)
 
-    # Pridėkime jungimo sekas ir apskaičiuokime terminalų kiekį
     grouped["Jungimų seka"] = grouped.apply(
-        lambda r: fill_missing_conns(r["Jungimo taškas"], int(r["Pajungimų skaičius"])) 
-        if pd.notna(r["Pajungimų skaičius"]) else "",
+        lambda r: fill_missing_conns(r["Jungimo taškas"], int(r["Pajungimų skaičius"]))
+        if pd.notna(r["Pajungimų skaičius"]) and r["Pajungimų skaičius"] > 0 else "",
         axis=1
     )
 
-    # Didžiausias jungimas
-    grouped["Didžiausias jungimas"] = grouped["Jungimo taškas"].apply(lambda x: max(x) if x else 0)
-
-    # Kiek terminalų
+    # Skaičiuojame terminalų kiekį pagal jungimų kiekį
+    grouped["Jungimų kiekis"] = grouped["Jungimo taškas"].apply(len)
     grouped["Terminalų kiekis"] = grouped.apply(
-        lambda r: max(1, math.ceil(r["Didžiausias jungimas"] / r["Pajungimų skaičius"]))
-        if pd.notna(r["Didžiausias jungimas"]) and pd.notna(r["Pajungimų skaičius"]) else 1,
+        lambda r: max(1, math.ceil(r["Jungimų kiekis"] / r["Pajungimų skaičius"]))
+        if pd.notna(r["Pajungimų skaičius"]) and r["Pajungimų skaičius"] > 0 else 1,
         axis=1
     )
 
-    # Rikiavimas
+    # Rikiavimas pagal grupę ir pavadinimą
     grouped = grouped.sort_values(by=["Grupė", "Terminalo pavadinimas"])
 
     # Lentelės atvaizdavimas
     display_cols = [
         "Terminalo pavadinimas", "Tipas", "Jungimų seka",
-        "Pajungimų skaičius", "Terminalų kiekis", "Matomumas", "Grupė", "Plotis (mm)"
+        "Jungimų kiekis", "Pajungimų skaičius", "Terminalų kiekis",
+        "Matomumas", "Grupė", "Plotis (mm)"
     ]
     st.dataframe(grouped[display_cols], use_container_width=True)
 
-    # Eksportas į Excel
+    # Eksportas
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         grouped.to_excel(writer, index=False, sheet_name="Rezultatas")
@@ -149,12 +153,9 @@ def stage3_process_results(df, excluded, terminal_table):
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
 
-    # Suminis terminalų kiekis
+    # Bendras terminalų kiekis
     total_terminals = grouped["Terminalų kiekis"].sum()
     st.markdown(f"### 🧮 Viso terminalų: **{int(total_terminals)}**")
-
-
-
 
 
 # ===============================================================
