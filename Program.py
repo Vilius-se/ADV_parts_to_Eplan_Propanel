@@ -72,7 +72,18 @@ def stage3_process_results(df, excluded, terminal_table):
 
     # Filtruojam
     df_filtered = df[~df.iloc[:, 0].isin(excluded)].copy()
-    df_filtered.columns = ["Terminalo pavadinimas", "Tipas", "Jungimo taškas", "Matomumas", "Grupė"]
+
+    st.write("Aptikti stulpeliai:", list(df_filtered.columns))
+    expected_cols = ["Terminalo pavadinimas", "Tipas", "Jungimo taškas", "Matomumas", "Grupė"]
+
+    if len(df_filtered.columns) < 5:
+        st.error(f"❌ Failas turi per mažai stulpelių ({len(df_filtered.columns)}). Tikimasi bent 5.")
+        st.stop()
+    elif len(df_filtered.columns) > 5:
+        st.warning(f"⚠️ Aptikta {len(df_filtered.columns)} stulpelių – bus paimti tik pirmi 5.")
+        df_filtered = df_filtered.iloc[:, :5]
+
+    df_filtered.columns = expected_cols
 
     # Pridedam plotį pagal tipą
     df_filtered = df_filtered.merge(
