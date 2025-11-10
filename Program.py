@@ -171,15 +171,16 @@ def stage3_process_results(df, excluded, term_base):
         vb_lines.append("    Public Sub Main()")
         vb_lines.append("        Try")
         vb_lines.append("            Dim cli As New CommandLineInterpreter()")
+        vb_lines.append("            Dim ctx As New ActionCallingContext()")
         vb_lines.append("")
     
-        # įrašome visus terminalus į VB kodą
+        # Įrašome terminalų eilutes
         for _, r in grouped.iterrows():
             name = str(r["Terminalo pavadinimas"]).replace('"', "'")
             ttype = str(r["Tipas"]).replace('"', "'")
             group = str(r["Grupė"]).replace('"', "'")
     
-            vb_lines.append("            Dim ctx As New ActionCallingContext()")
+            vb_lines.append("            ctx = New ActionCallingContext()")
             vb_lines.append(f'            ctx.AddParameter("Name", "{name}")')
             vb_lines.append(f'            ctx.AddParameter("Type", "{ttype}")')
             vb_lines.append('            ctx.AddParameter("FunctionDefinition", "Terminal")')
@@ -202,6 +203,7 @@ def stage3_process_results(df, excluded, term_base):
             file_name="Import_Terminals_2025.vb",
             mime="text/plain"
         )
+
 
 
 
