@@ -43,6 +43,10 @@ def stage2_exclude_selection(df):
                         "-X908", "-X923", "-X927", "-X928", "-XTB10"]
     unique_terms = sorted(df.iloc[:, 0].dropna().unique())
 
+    # --- Naudojam session_state, kad duomenys neišsitrintų ---
+    if "excluded" not in st.session_state:
+        st.session_state.excluded = None
+
     selected = []
     with st.form("exclude_form"):
         st.write("Pažymėkite terminalus, kuriuos norite pašalinti:")
@@ -53,9 +57,10 @@ def stage2_exclude_selection(df):
         approved = st.form_submit_button("✅ Approve")
 
     if approved:
+        st.session_state.excluded = selected
         st.success(f"Patvirtinta. Pašalinti terminalai: {', '.join(selected) if selected else 'nėra'}")
-        return selected
-    return None
+
+    return st.session_state.excluded
 
 
 def stage3_process_results(df, excluded, terminal_table):
