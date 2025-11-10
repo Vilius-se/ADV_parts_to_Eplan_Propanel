@@ -160,7 +160,7 @@ def stage3_process_results(df, excluded, term_base):
         vb_lines = []
         vb_lines.append("' ================================================================")
         vb_lines.append("' UNIVERSALUS EPLAN 2025 TERMINALŲ ĮKĖLIMO SKRIPTAS")
-        vb_lines.append("' Veikia ir Pro Panel, ir Electric P8 aplinkoje")
+        vb_lines.append("' Veikia tiek Pro Panel, tiek Electric P8 aplinkoje")
         vb_lines.append("' Sugeneruota Streamlit programos")
         vb_lines.append("' ================================================================")
         vb_lines.append("")
@@ -170,9 +170,7 @@ def stage3_process_results(df, excluded, term_base):
         vb_lines.append("        Try")
         vb_lines.append("            Dim cli As New CommandLineInterpreter()")
         vb_lines.append("            Dim ctx As New ActionCallingContext()")
-        vb_lines.append("")
-        vb_lines.append("            ' --- Patikriname, ar egzistuoja XEsCreateDevice ---")
-        vb_lines.append('            Dim hasProPanel As Boolean = cli.HasAction("XEsCreateDevice")')
+        vb_lines.append("            Dim success As Boolean = False")
         vb_lines.append("")
     
         for _, r in grouped.iterrows():
@@ -186,9 +184,14 @@ def stage3_process_results(df, excluded, term_base):
             vb_lines.append('            ctx.AddParameter("FunctionDefinition", "Terminal")')
             vb_lines.append(f'            ctx.AddParameter("MountingLocation", "{group}")')
             vb_lines.append("")
-            vb_lines.append("            If hasProPanel Then")
+            vb_lines.append("            Try")
             vb_lines.append('                cli.Execute("XEsCreateDevice", ctx)')
-            vb_lines.append("            Else")
+            vb_lines.append("                success = True")
+            vb_lines.append("            Catch ex1 As Exception")
+            vb_lines.append("                success = False")
+            vb_lines.append("            End Try")
+            vb_lines.append("")
+            vb_lines.append("            If success = False Then")
             vb_lines.append('                cli.Execute("XAfActionCreateFunction", ctx)')
             vb_lines.append("            End If")
             vb_lines.append("")
@@ -208,6 +211,7 @@ def stage3_process_results(df, excluded, term_base):
             file_name="Import_Terminals_2025.vb",
             mime="text/plain"
         )
+
 
 
 
