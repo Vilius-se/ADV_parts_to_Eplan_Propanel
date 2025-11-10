@@ -154,12 +154,13 @@ def stage3_process_results(df, excluded, term_base):
     st.markdown(f"### 🧮 Iš viso terminalų: **{int(total_terminals)}**")
 
     # ---------------------------------------------------------------
-    # 4️⃣ VB.NET skripto (EPLAN 2025) generavimas
+    # 4️⃣ VB.NET skripto (EPLAN 2025) generavimas – CommandLineInterpreter API
     # ---------------------------------------------------------------
     if st.button("💻 Generuoti EPLAN 2025 VB.NET skriptą (.vb)"):
         vb_lines = []
         vb_lines.append("' ================================================================")
         vb_lines.append("' EPLAN 2025 – Terminalų automatinis įkėlimas (Streamlit sugeneruota)")
+        vb_lines.append("' Naudoja CommandLineInterpreter + ActionCallingContext (naujas API)")
         vb_lines.append("' ================================================================")
         vb_lines.append("Imports Eplan.EplApi.Scripting")
         vb_lines.append("Imports Eplan.EplApi.ApplicationFramework")
@@ -169,20 +170,24 @@ def stage3_process_results(df, excluded, term_base):
         vb_lines.append("    <Start>")
         vb_lines.append("    Public Sub Main()")
         vb_lines.append("        Try")
-        vb_lines.append("            Dim actMgr As New ActionManager()")
-        vb_lines.append("            Dim eplanAction As Eplan.EplApi.ApplicationFramework.Action = actMgr.GetAction(\"XEsCreateDevice\")")
+        vb_lines.append("            Dim cli As New CommandLineInterpreter()")
+        vb_lines.append("            Dim ctx As New ActionCallingContext()")
         vb_lines.append("")
-        vb_lines.append("            ' --- Automatiškai sugeneruoti terminalai iš Streamlit ---")
 
-        # įrašome duomenis iš lentelės į skriptą
+        # įrašome visus terminalus į VB kodą
         for _, r in grouped.iterrows():
             name = str(r["Terminalo pavadinimas"]).replace('"', "'")
             ttype = str(r["Tipas"]).replace('"', "'")
             group = str(r["Grupė"]).replace('"', "'")
-            vb_lines.append(f'            eplanAction.Execute("Name:{name},Type:{ttype},FunctionDefinition:Terminal,MountingLocation:{group}")')
+            vb_lines.append("            ctx.Clear()")
+            vb_lines.append(f'            ctx.AddParameter("Name", "{name}")')
+            vb_lines.append(f'            ctx.AddParameter("Type", "{ttype}")')
+            vb_lines.append('            ctx.AddParameter("FunctionDefinition", "Terminal")')
+            vb_lines.append(f'            ctx.AddParameter("MountingLocation", "{group}")')
+            vb_lines.append('            cli.Execute("XEsCreateDevice", ctx)')
+            vb_lines.append("")
 
-        vb_lines.append("")
-        vb_lines.append('            MessageBox.Show("✅ Terminalai sėkmingai įkelti į projektą!", "EPLAN Script", MessageBoxButtons.OK, MessageBoxIcon.Information)')
+        vb_lines.append(f'            MessageBox.Show("✅ Sukurta {int(total_terminals)} terminalų!", "EPLAN Script", MessageBoxButtons.OK, MessageBoxIcon.Information)')
         vb_lines.append("        Catch ex As Exception")
         vb_lines.append('            MessageBox.Show("❌ Klaida: " & ex.Message, "EPLAN Script", MessageBoxButtons.OK, MessageBoxIcon.Error)')
         vb_lines.append("        End Try")
@@ -197,6 +202,7 @@ def stage3_process_results(df, excluded, term_base):
             file_name="Import_Terminals_2025.vb",
             mime="text/plain"
         )
+
 
 
 
